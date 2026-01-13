@@ -9,6 +9,7 @@ whisper.cpp server.
 - Transcribes audio and writes an `.srt` file next to the video. **Note:** This will overwrite any existing SRT files that match the naming scheme.
 - Adds a UI dropdown button (via `whisper_transcribe.js`) to manually trigger transcription for the current scene.
 - The transcribe option is now available in the three vertical dots **operations menu** alongside rescan, generate, etc.
+- The plugin provides a task that can be started from the Settings window and is cancelable.
 
 ![Operations menu showing Whisper Transcribe option](operations_menu.png)
 - Supports optional translation to English (`translateToEnglish` setting) and a dry‑run mode (`zzdryRun`).
