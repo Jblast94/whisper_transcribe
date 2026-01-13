@@ -11,6 +11,7 @@ whisper.cpp server.
 - The transcribe option is now available in the three vertical dots **operations menu** alongside rescan, generate, etc.
 
 ![Operations menu showing Whisper Transcribe option](operations_menu.png)
+- The plugin provides a task that can be started from the Settings window and is cancelable.
 - Supports optional translation to English (`translateToEnglish` setting) and a dry‑run mode (`zzdryRun`).
 - Debug tracing can be enabled with the `zzdebugTracing` setting.
 
