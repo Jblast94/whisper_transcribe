@@ -170,28 +170,46 @@
     return true;
   }
 
-  // Initial attempt
-  mountIfPossible();
-
-  // Observe DOM changes for SPA navigation and render timing
-  const observer = new MutationObserver((mutationsList) => {
-    for (const mutation of mutationsList) {
-      for (const addedNode of mutation.addedNodes) {
-        if (addedNode.nodeType !== Node.ELEMENT_NODE) continue;
-
-        // If the operations menu or its toggle appears, attempt mount.
-        if (
-          addedNode.id === OPERATIONS_TOGGLE_ID ||
-          addedNode.querySelector?.(`#${OPERATIONS_TOGGLE_ID}`) ||
-          addedNode.classList?.contains('dropdown-menu')
-        ) {
-          mountIfPossible();
+  // Register as a Stash UI task if possible; fallback to menu item.
+  if (typeof window.registerTask === 'function') {
+    window.registerTask({
+      name: 'Transcribe scene (Whisper)',
+      description: 'Transcribe the current scene using Whisper',
+      icon: 'fa-microphone',
+      handler: async () => {
+        const sceneId = getSceneIdFromURL();
+        if (!sceneId) {
+          alert('Whisper Transcribe: could not determine scene id from URL.');
           return;
         }
+        await runTranscribe(sceneId);
+      },
+    });
+    console.debug('[WhisperTranscribe] Task registered via registerTask');
+  } else {
+    // Fallback to original menu item approach.
+    mountIfPossible();
+
+    // Observe DOM changes for SPA navigation and render timing
+    const observer = new MutationObserver((mutationsList) => {
+      for (const mutation of mutationsList) {
+        for (const addedNode of mutation.addedNodes) {
+          if (addedNode.nodeType !== Node.ELEMENT_NODE) continue;
+
+          // If the operations menu or its toggle appears, attempt mount.
+          if (
+            addedNode.id === OPERATIONS_TOGGLE_ID ||
+            addedNode.querySelector?.(`#${OPERATIONS_TOGGLE_ID}`) ||
+            addedNode.classList?.contains('dropdown-menu')
+          ) {
+            mountIfPossible();
+            return;
+          }
+        }
       }
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
 
   console.debug('[WhisperTranscribe] UI script initialized');
 })();
