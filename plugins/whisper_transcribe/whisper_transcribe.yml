@@ -1,6 +1,6 @@
 name: WhisperTranscribe
 description: Transcribes video (scene) files using a whisper.cpp server.
-version: 0.1.1
+version: 0.2.0
 url: https://github.com/Jay4242/whisper_transcribe/
 ui:
   css:
