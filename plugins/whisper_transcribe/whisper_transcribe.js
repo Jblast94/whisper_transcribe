@@ -5,7 +5,9 @@
   // - folder name ("whisper_transcribe")
   // - YAML name ("WhisperTranscribe")
   const PLUGIN_IDS = ['whisper_transcribe', 'WhisperTranscribe'];
-  const DROPDOWN_ID = 'whisper-transcribe-dropdown-container';
+  const MENU_ITEM_ID = 'whisper-transcribe-menu-item';
+  // The three‑dot "operations menu" (ID: operation-menu) that contains actions like rescan, generate, etc.
+  const OPERATIONS_TOGGLE_ID = 'operation-menu';
 
   function getSceneIdFromURL() {
     try {
@@ -97,30 +99,27 @@
     }
   }
 
-  function buildDropdown(targetTitleEl) {
-    if (!targetTitleEl || document.getElementById(DROPDOWN_ID)) return;
+  function closeDropdown(menuEl) {
+    const dropdown = menuEl?.closest('.dropdown');
+    menuEl?.classList.remove('show');
+    dropdown?.classList.remove('show');
+  }
 
-    const container = document.createElement('div');
-    container.id = DROPDOWN_ID;
-    container.className = 'wt-dropdown';
+  function createMenuItem(menuEl) {
+    if (!menuEl) return;
+    const existing = document.getElementById(MENU_ITEM_ID);
+    if (existing) {
+      // If it's already in the correct menu, nothing to do.
+      if (menuEl.contains(existing)) return;
+      existing.remove();
+    }
 
-    container.innerHTML = `
-      <button class="wt-dropbtn btn btn-secondary btn-sm" type="button" title="Whisper Transcribe">
-        Transcribe
-        <span class="wt-caret">▾</span>
-      </button>
-      <div class="wt-dropdown-content">
-        <a href="#" id="wt-transcribe-action">Transcribe scene (Whisper)</a>
-      </div>
-    `;
-
-    // Place next to the scene title, similar to the RenameFile plugin's target
-    const parent = targetTitleEl.parentElement || targetTitleEl;
-    parent.appendChild(container);
-
-    // Wire up actions
-    const actionEl = container.querySelector('#wt-transcribe-action');
-    actionEl.addEventListener('click', function (ev) {
+    const item = document.createElement('button');
+    item.id = MENU_ITEM_ID;
+    item.type = 'button';
+    item.className = 'dropdown-item bg-secondary text-white';
+    item.textContent = 'Transcribe scene (Whisper)';
+    item.addEventListener('click', function (ev) {
       ev.preventDefault();
       const sceneId = getSceneIdFromURL();
       if (!sceneId) {
@@ -128,52 +127,71 @@
         return;
       }
       runTranscribe(sceneId);
-      // hide menu after click
-      container.classList.remove('wt-open');
+      closeDropdown(menuEl);
     });
 
-    // Dropdown toggle
-    const btn = container.querySelector('.wt-dropbtn');
-    btn.addEventListener('click', function (ev) {
-      ev.preventDefault();
-      container.classList.toggle('wt-open');
+    // Try to position after "Generate default thumbnail"
+    const items = Array.from(menuEl.querySelectorAll('.dropdown-item'));
+    const defaultThumbItem = items.find((el) => {
+      const text = (el.textContent || '').trim().toLowerCase();
+      return text.includes('generate default thumbnail');
     });
-
-    // Close when clicking outside
-    document.addEventListener('click', function (ev) {
-      if (!container.contains(ev.target)) {
-        container.classList.remove('wt-open');
+    if (defaultThumbItem?.parentElement === menuEl) {
+      defaultThumbItem.insertAdjacentElement('afterend', item);
+    } else {
+      // Fall back: place before delete to keep destructive actions at the end.
+      const deleteItem = items.find((el) => {
+        const text = (el.textContent || '').trim().toLowerCase();
+        return text.includes('delete');
+      });
+      if (deleteItem?.parentElement === menuEl) {
+        menuEl.insertBefore(item, deleteItem);
+      } else {
+        menuEl.appendChild(item);
       }
-    });
+    }
+  }
+
+  function findOperationsMenu() {
+    const toggle = document.getElementById(OPERATIONS_TOGGLE_ID);
+    if (!toggle) return null;
+    const dropdown = toggle.closest('.dropdown');
+    if (!dropdown) return null;
+    const menuEl = dropdown.querySelector('.dropdown-menu');
+    if (!menuEl) return null;
+    return menuEl;
   }
 
   function mountIfPossible() {
-    // Match the same area the RenameFile script targets
-    const titleEl = document.querySelector('.scene-header div.TruncatedText');
-    if (titleEl) {
-      buildDropdown(titleEl);
-      return true;
-    }
-    return false;
+    if (!getSceneIdFromURL()) return false;
+    const menuEl = findOperationsMenu();
+    if (!menuEl) return false;
+    createMenuItem(menuEl);
+    return true;
   }
 
   // Initial attempt
-  if (!mountIfPossible()) {
-    // Observe DOM changes for SPA navigation and render timing
-    const observer = new MutationObserver((mutationsList) => {
-      for (const mutation of mutationsList) {
-        for (const addedNode of mutation.addedNodes) {
-          if (addedNode.nodeType === Node.ELEMENT_NODE) {
-            const q = addedNode.querySelector?.('.scene-header div.TruncatedText');
-            if (q) {
-              buildDropdown(q);
-            }
-          }
+  mountIfPossible();
+
+  // Observe DOM changes for SPA navigation and render timing
+  const observer = new MutationObserver((mutationsList) => {
+    for (const mutation of mutationsList) {
+      for (const addedNode of mutation.addedNodes) {
+        if (addedNode.nodeType !== Node.ELEMENT_NODE) continue;
+
+        // If the operations menu or its toggle appears, attempt mount.
+        if (
+          addedNode.id === OPERATIONS_TOGGLE_ID ||
+          addedNode.querySelector?.(`#${OPERATIONS_TOGGLE_ID}`) ||
+          addedNode.classList?.contains('dropdown-menu')
+        ) {
+          mountIfPossible();
+          return;
         }
       }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 
   console.debug('[WhisperTranscribe] UI script initialized');
 })();
