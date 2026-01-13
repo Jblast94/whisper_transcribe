@@ -62,11 +62,11 @@
 
   async function runTranscribe(sceneId) {
     const mutation = `
-      mutation RunPluginOperation($plugin_id: ID!, $args: Map!) {
-        runPluginOperation(plugin_id: $plugin_id, args: $args)
+      mutation RunPluginTask($plugin_id: ID!, $args_map: Map!) {
+        runPluginTask(plugin_id: $plugin_id, args_map: $args_map)
       }
     `;
-    const args = { mode: 'transcribe_scene_task', scene_id: sceneId };
+    const args_map = { mode: 'transcribe_scene_task', scene_id: sceneId };
     const base = document.querySelector('base')?.getAttribute('href') || '/';
     const graphqlURL = new URL('graphql', new URL(base, window.location.href)).toString();
 
@@ -83,7 +83,7 @@
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: mutation, variables: { plugin_id: resolvedId, args } }),
+        body: JSON.stringify({ query: mutation, variables: { plugin_id: resolvedId, args_map } }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const json = await res.json();
@@ -92,7 +92,7 @@
         alert('Failed to start transcription. See console for details.');
         return;
       }
-      console.debug('[WhisperTranscribe] Transcription started:', json.data);
+      console.debug('[WhisperTranscribe] Transcription queued as job:', json.data?.runPluginTask);
     } catch (e) {
       console.error('[WhisperTranscribe] Request failed:', e);
       alert('Failed to start transcription. See console for details.');
