@@ -120,7 +120,7 @@ class StashPluginHelper:
             if base:
                 url = base.rstrip("/") + "/graphql"
         if not url:
-            url = "http://127.0.0.1:9999/graphql"
+            url = "http://127.0.01:9999/graphql"
         return url
 
     def _graphql(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
