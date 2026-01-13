@@ -23,6 +23,86 @@ except Exception:
     # Fallback to local minimal helper if StashPluginHelper isn't available
     from stash_helper_fallback import StashPluginHelper, taskQueue  # type: ignore
 
+# GraphQL helper utilities to fetch plugin settings when the helper can't.
+def _build_graphql_url(server_connection: dict) -> str:
+    scheme = (server_connection or {}).get("Scheme") or (server_connection or {}).get("scheme") or "http"
+    host = (server_connection or {}).get("Host") or (server_connection or {}).get("host") or "127.0.0.1"
+    port = (server_connection or {}).get("Port") or (server_connection or {}).get("port")
+    if port:
+        return f"{scheme}://{host}:{port}/graphql"
+    return f"{scheme}://{host}/graphql"
+
+
+def _cookie_header(session_cookie: object) -> str | None:
+    # Expecting a dict-like cookie with Name/Value (case-insensitive)
+    try:
+        if isinstance(session_cookie, dict):
+            name = session_cookie.get("Name") or session_cookie.get("name")
+            value = session_cookie.get("Value") or session_cookie.get("value")
+            if name and value:
+                return f"{name}={value}"
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_server_url_from_settings(json_input: dict) -> str | None:
+    """
+    Best-effort fetch of this plugin's saved 'serverUrl' from Stash via GraphQL.
+    Works even when running with the minimal fallback helper.
+    """
+    try:
+        conn = (json_input or {}).get("server_connection") or (json_input or {}).get("ServerConnection") or {}
+        graphql_url = _build_graphql_url(conn)
+        cookie = (conn.get("SessionCookie") or conn.get("session_cookie") or conn.get("sessionCookie"))
+        cookie_hdr = _cookie_header(cookie)
+
+        # Query the configuration endpoint, which includes plugin configuration values.
+        query = """
+            query($ids: [ID!]) {
+                configuration {
+                    plugins(include: $ids)
+                }
+            }
+        """
+        headers = {"Content-Type": "application/json"}
+        if cookie_hdr:
+            headers["Cookie"] = cookie_hdr
+        # Ask for both common plugin IDs to maximise compatibility.
+        variables = {"ids": ["whisper_transcribe", "WhisperTranscribe"]}
+        payload = json.dumps({"query": query, "variables": variables})
+
+        try:
+            import requests  # type: ignore
+        except Exception:
+            requests = None
+
+        if requests is not None:
+            resp = requests.post(graphql_url, data=payload, headers=headers, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+        else:
+            req = urllib.request.Request(graphql_url, data=payload.encode("utf-8"), headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+
+        config_plugins = (((data or {}).get("data") or {}).get("configuration") or {}).get("plugins") or {}
+        if not isinstance(config_plugins, dict):
+            return None
+
+        # Configuration plugins come back as a map of pluginID -> map of settings.
+        for pid in variables["ids"]:
+            settings_map = config_plugins.get(pid)
+            if isinstance(settings_map, dict):
+                v = settings_map.get("serverUrl")
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+
+        return None
+    except Exception:
+        # Silent best-effort
+        return None
+
 # Self-contained transcription logic (no external imports).
 def _post_whisper_audio(wav_path: str, server_url: str, translate: bool) -> str:
     try:
@@ -124,7 +204,7 @@ def _check_whisper_server(server_url: str, timeout: float = 5.0) -> None:
             ) from e
 
 
-def transcribe_video(video_path: str, translate: bool = False, server_url: str = "http://localhost:9191/inference") -> None:
+def transcribe_video(video_path: str, translate: bool = False, server_url: str = "http://127.0.0.1:9191/inference") -> None:
     """
     Transcribes a video file using a whisper.cpp server. Produces an .srt next to the video.
     """
@@ -181,6 +261,11 @@ def transcribe_video(video_path: str, translate: bool = False, server_url: str =
 # Minimal plugin settings – can be extended via a settings file if needed.
 # ----------------------------------------------------------------------
 settings = {
+    # Defaults here are overridden by saved plugin settings from the UI.
+    # The server URL is resolved dynamically; we do not set a hard‑coded default here
+    # to avoid overriding a user‑provided UI setting. Fallbacks are handled in
+    # _resolve_server_url() (environment variable, then built‑in default).
+    "translateToEnglish": False,
     "zzdebugTracing": False,
     "zzdryRun": False,
 }
@@ -196,10 +281,86 @@ stash = StashPluginHelper(
     maxbytes=10 * 1024 * 1024,
 )
 
-# Read UI settings (with sane defaults)
-server_url = stash.Setting("serverUrl", os.getenv("WHISPER_SERVER_URL", "http://127.0.0.1:9191/inference"))
+# ----------------------------------------------------------------------
+# Resolve the Whisper server URL – this logic works for every Stash payload
+# format (dict settings, list of {key,value}, or ``pluginSettings``).
+# ----------------------------------------------------------------------
+def _resolve_server_url() -> str:
+    """
+    Resolve the Whisper server URL using the Stash helper's Setting() method,
+    which already knows how to read UI settings in all supported formats.
+    Precedence (high → low):
+        1. Explicit ``serverUrl`` argument passed in ``args``.
+        2. UI‑saved setting (dict, list of {key,value}, or ``pluginSettings``).
+        3. Direct extraction from raw JSON payload (covers cases where the helper
+           does not correctly read the UI settings).
+        4. Fallback to GraphQL fetch of plugin settings (for edge cases).
+        5. Environment variable ``WHISPER_SERVER_URL``.
+        6. Built‑in default.
+    """
+    # 1️⃣ explicit arg
+    arg_url = ((stash.JSON_INPUT or {}).get("args") or {}).get("serverUrl")
+    if isinstance(arg_url, str) and arg_url.strip():
+        return arg_url.strip()
+
+    # 2️⃣ UI‑saved setting via the helper (covers dict, list, pluginSettings)
+    ui_url = stash.Setting("serverUrl", None)
+    if isinstance(ui_url, str) and ui_url.strip():
+        return ui_url.strip()
+
+    # 3️⃣ Direct extraction from raw JSON payload (fallback if helper fails)
+    raw_url = None
+    if isinstance(stash.JSON_INPUT, dict):
+        # Check top‑level 'settings' (dict or list)
+        settings_src = stash.JSON_INPUT.get("settings") or {}
+        if isinstance(settings_src, dict):
+            raw_url = settings_src.get("serverUrl")
+        elif isinstance(settings_src, list):
+            for item in settings_src:
+                if isinstance(item, dict) and item.get("key") == "serverUrl":
+                    raw_url = item.get("value")
+                    break
+
+        # If not found, check 'pluginSettings' (dict or list)
+        if not raw_url:
+            alt_src = stash.JSON_INPUT.get("pluginSettings") or {}
+            if isinstance(alt_src, dict):
+                raw_url = alt_src.get("serverUrl")
+            elif isinstance(alt_src, list):
+                for item in alt_src:
+                    if isinstance(item, dict) and item.get("key") == "serverUrl":
+                        raw_url = item.get("value")
+                        break
+
+    if isinstance(raw_url, str) and raw_url.strip():
+        return raw_url.strip()
+
+    # 4️⃣ Fallback to GraphQL fetch of plugin settings (covers cases where
+    #    the helper cannot read the UI settings directly)
+    fetched_url = _fetch_server_url_from_settings(stash.JSON_INPUT or {})
+    if isinstance(fetched_url, str) and fetched_url.strip():
+        return fetched_url.strip()
+
+    # 5️⃣ environment variable
+    env_url = os.getenv("WHISPER_SERVER_URL")
+    if isinstance(env_url, str) and env_url.strip():
+        return env_url.strip()
+
+    # 6️⃣ built‑in default
+    return "http://127.0.0.1:9191/inference"
+
+# Resolve once at import time (the value is immutable for the lifetime of the run)
+server_url = _resolve_server_url()
+
 translate_to_english = stash.Setting("translateToEnglish", False)
 dry_run = stash.Setting("zzdryRun", False)
+
+# Optional debug trace of resolved server URL
+try:
+    if stash.Setting("zzdebugTracing", False):
+        stash.Log(f"[WhisperTranscribe] Resolved serverUrl={server_url!r}")
+except Exception:
+    pass
 
 # Detect if invoked by a Scene.Update.Post hook and capture scene ID if provided
 inputToUpdateScenePost = False
