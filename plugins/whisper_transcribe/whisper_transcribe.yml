@@ -28,8 +28,3 @@ exec:
   - python
   - "{pluginDir}/whisper_transcribe.py"
 interface: raw
-hooks:
-  - name: TranscribeScene
-    description: Transcribes a scene's video file when the scene is updated.
-    triggeredBy:
-      - Scene.Update.Post
