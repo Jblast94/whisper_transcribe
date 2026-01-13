@@ -41,12 +41,37 @@ class StashPluginHelper:
 
     # Settings come from JSON_INPUT.settings (preferred), falling back to ctor settings and args
     def Setting(self, name: str, default: Any = None) -> Any:
+        """
+        Retrieve a plugin setting value with the following precedence:
+        1. UI‑provided settings (can be a dict or a list of {key, value} objects).
+        2. Settings passed via the "args" payload.
+        3. Default settings supplied to the helper constructor.
+        """
+        # 1️⃣ UI settings – Stash may provide them as a dict or as a list of key/value dicts.
         src = self.JSON_INPUT.get("settings", {})
-        if isinstance(src, dict) and name in src:
-            return src.get(name, default)
+        if isinstance(src, dict):
+            if name in src:
+                return src.get(name, default)
+        elif isinstance(src, list):
+            for item in src:
+                if isinstance(item, dict) and item.get("key") == name:
+                    return item.get("value", default)
+
+        # Some Stash versions expose plugin settings under a different key.
+        alt_src = self.JSON_INPUT.get("pluginSettings", {})
+        if isinstance(alt_src, dict) and name in alt_src:
+            return alt_src.get(name, default)
+        elif isinstance(alt_src, list):
+            for item in alt_src:
+                if isinstance(item, dict) and item.get("key") == name:
+                    return item.get("value", default)
+
+        # 2️⃣ Arguments passed directly to the plugin.
         args = self.JSON_INPUT.get("args", {})
         if isinstance(args, dict) and name in args:
             return args.get(name, default)
+
+        # 3️⃣ Fallback to defaults supplied at construction time.
         return self.settings.get(name, default)
 
     # ---- Logging (stderr) using Stash plugin log level prefixes ----
@@ -95,7 +120,7 @@ class StashPluginHelper:
             if base:
                 url = base.rstrip("/") + "/graphql"
         if not url:
-            url = "http://localhost:9999/graphql"
+            url = "http://127.0.0.1:9999/graphql"
         return url
 
     def _graphql(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
