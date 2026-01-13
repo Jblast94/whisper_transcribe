@@ -24,6 +24,10 @@ settings:
     displayName: Dry Run
     description: If enabled, no files are created; actions are logged only.
     type: BOOLEAN
+  timeout:
+    displayName: Whisper Server Timeout (seconds)
+    description: "Timeout in seconds for contacting the Whisper server."
+    type: NUMBER
 exec:
   - python
   - "{pluginDir}/whisper_transcribe.py"
