@@ -1,0 +1,35 @@
+name: WhisperTranscribe
+description: Transcribes video (scene) files using a whisper.cpp server.
+version: 0.1.1
+url: https://github.com/Jay4242/whisper_transcribe/
+ui:
+  css:
+    - whisper_transcribe.css
+  javascript:
+    - whisper_transcribe.js
+settings:
+  serverUrl:
+    displayName: Whisper Server URL
+    description: "The whisper.cpp server inference endpoint URL. Can also be set via WHISPER_SERVER_URL."
+    type: STRING
+  translateToEnglish:
+    displayName: Translate to English
+    description: "Request translation to English (instead of transcribing in source language)."
+    type: BOOLEAN
+  zzdebugTracing:
+    displayName: Debug Tracing
+    description: Enable debug tracing for additional logging.
+    type: BOOLEAN
+  zzdryRun:
+    displayName: Dry Run
+    description: If enabled, no files are created; actions are logged only.
+    type: BOOLEAN
+exec:
+  - python
+  - "{pluginDir}/whisper_transcribe.py"
+interface: raw
+hooks:
+  - name: TranscribeScene
+    description: Transcribes a scene's video file when the scene is updated.
+    triggeredBy:
+      - Scene.Update.Post
