@@ -26,7 +26,7 @@ except Exception:
 # GraphQL helper utilities to fetch plugin settings when the helper can't.
 def _build_graphql_url(server_connection: dict) -> str:
     scheme = (server_connection or {}).get("Scheme") or (server_connection or {}).get("scheme") or "http"
-    host = (server_connection or {}).get("Host") or (server_connection or {}).get("host") or "127.0.0.1"
+    host = (server_connection or {}).get("Host") or (server_connection or {}).get("host") or "127.0.01"
     port = (server_connection or {}).get("Port") or (server_connection or {}).get("port")
     if port:
         return f"{scheme}://{host}:{port}/graphql"
@@ -188,6 +188,60 @@ def _check_whisper_server(server_url: str, timeout: float = 5.0) -> None:
                 "Configure the 'Whisper Server URL' plugin setting or set WHISPER_SERVER_URL. "
                 f"Underlying error: {e}"
             ) from e
+
+
+def _build_caption_path(video_path: str, language_code: str | None = None) -> str:
+    """
+    Build an SRT path next to the video. If a language code is provided, suffix it
+    (e.g. video.en.srt) so Stash can associate captions without a full rescan.
+    """
+    base, _ = os.path.splitext(video_path)
+    lang = (language_code or "").strip().lower()
+    if lang:
+        return f"{base}.{lang}.srt"
+    return f"{base}.srt"
+
+
+def _trigger_metadata_scan(paths: list[str]) -> None:
+    """
+    Kick off a targeted metadata scan for the provided paths so Stash will register
+    newly created caption files without needing a full library rescan.
+    """
+    if not paths:
+        return
+
+    mutation = """
+    mutation ScanCaptions($input: ScanMetadataInput!) {
+      metadataScan(input: $input)
+    }
+    """
+    # Keep the scan as light as possible – just look at the provided paths.
+    variables = {
+        "input": {
+            "paths": paths,
+            "rescan": True,
+            "scanGenerateCovers": False,
+            "scanGeneratePreviews": False,
+            "scanGenerateImagePreviews": False,
+            "scanGenerateSprites": False,
+            "scanGeneratePhashes": False,
+            "scanGenerateThumbnails": False,
+            "scanGenerateClipPreviews": False,
+        }
+    }
+
+    try:
+        resp = stash._graphql(mutation, variables)
+        job_id = None
+        if isinstance(resp, dict):
+            data = resp.get("data") or {}
+            job_id = data.get("metadataScan")
+        if job_id:
+            stash.Log(f"Triggered caption metadata scan (job {job_id}) for: {paths}")
+        else:
+            stash.Warn(f"Metadata scan triggered for captions but no job id returned. Paths={paths}")
+    except Exception as e:
+        stash.Warn(f"Failed to start metadata scan for captions: {e}")
     else:
         req = urllib.request.Request(server_url, method="OPTIONS")
         try:
@@ -204,9 +258,10 @@ def _check_whisper_server(server_url: str, timeout: float = 5.0) -> None:
             ) from e
 
 
-def transcribe_video(video_path: str, translate: bool = False, server_url: str = "http://127.0.0.1:9191/inference") -> None:
+def transcribe_video(video_path: str, translate: bool = False, server_url: str = "http://127.0.01:9191/inference", caption_language: str | None = None) -> str:
     """
-    Transcribes a video file using a whisper.cpp server. Produces an .srt next to the video.
+    Transcribes a video file using a whisper.cpp server. Produces an .srt next to the video
+    and returns the caption path.
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video file not found at '{video_path}'")
@@ -250,13 +305,13 @@ def transcribe_video(video_path: str, translate: bool = False, server_url: str =
                 pass
 
     # 3. Save response to SRT file
-    srt_path = os.path.splitext(video_path)[0] + ".srt"
+    srt_path = _build_caption_path(video_path, caption_language)
     try:
         with open(srt_path, "w", encoding="utf-8") as srt_file:
             srt_file.write(response_text)
     except OSError as e:
         raise RuntimeError(f"Failed to write SRT file '{srt_path}': {e}") from e
-
+    return srt_path
 # ----------------------------------------------------------------------
 # Minimal plugin settings – can be extended via a settings file if needed.
 # ----------------------------------------------------------------------
@@ -404,10 +459,21 @@ def transcribe_scene(scene_id: int):
 
         # Call the shared transcription helper.
         # Use configured translate/server_url settings, and support dry-run.
+        caption_language = "en" if translate_to_english else None
+        caption_path = _build_caption_path(video_path, caption_language)
         if dry_run:
-            stash.Log(f"Dry-run: would transcribe '{video_path}' (translate={translate_to_english}, server_url={server_url})")
+            stash.Log(f"Dry-run: would transcribe '{video_path}' -> '{caption_path}' (translate={translate_to_english}, server_url={server_url})")
         else:
-            transcribe_video(video_path, translate=translate_to_english, server_url=server_url)
+            caption_path = transcribe_video(
+                video_path,
+                translate=translate_to_english,
+                server_url=server_url,
+                caption_language=caption_language,
+            )
+            try:
+                _trigger_metadata_scan([caption_path])
+            except Exception as e:
+                stash.Warn(f"Failed to start metadata scan for captions on scene {scene_id}: {e}")
 
         stash.Log(f"Transcription completed for scene {scene_id} (file: {video_path})")
     except Exception as e:
