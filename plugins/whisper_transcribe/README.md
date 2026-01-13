@@ -9,6 +9,9 @@ whisper.cpp server.
 - Retrieves the video file for the updated scene.
 - Transcribes audio and writes an `.srt` file next to the video.
 - Provides a task to manually transcribe the most recently updated scene.
+- Adds a UI dropdown button (via `whisper_transcribe.js`) to manually trigger transcription for the current scene.
+- Supports optional translation to English (`translateToEnglish` setting) and a dry‑run mode (`zzdryRun`).
+- Debug tracing can be enabled with the `zzdebugTracing` setting.
 
 ## Installation
 
@@ -21,7 +24,13 @@ whisper.cpp server.
 
 ## Configuration
 
-Use the plugin settings in the Stash UI to configure behaviour (e.g., server URL, translation).
+Use the plugin settings in the Stash UI to configure behaviour:
+
+- **serverUrl** – Whisper server inference endpoint (default `http://127.0.0.1:9191/inference`).
+- **translateToEnglish** – Translate transcription to English instead of source language.
+- **zzdebugTracing** – Enable additional debug logs.
+- **zzdryRun** – When enabled, no files are created; actions are only logged.
+
 You can also set the `WHISPER_SERVER_URL` environment variable to override the server URL.
 The optional `whisper_transcribe_settings.py` remains for advanced overrides.
 
