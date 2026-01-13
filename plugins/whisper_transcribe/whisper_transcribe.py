@@ -267,7 +267,7 @@ def transcribe_video(video_path: str, translate: bool = False, server_url: str =
         raise FileNotFoundError(f"Video file not found at '{video_path}'")
 
     # Verify server reachability before doing any work.
-    _check_whisper_server(server_url)
+    _check_whisper_server(server_url, timeout)
 
     tmp_wav_path = None
     try:
@@ -409,6 +409,8 @@ server_url = _resolve_server_url()
 
 translate_to_english = stash.Setting("translateToEnglish", False)
 dry_run = stash.Setting("zzdryRun", False)
+# New timeout setting (seconds) – defaults to 3600 seconds if not configured.
+timeout = stash.Setting("timeout", 3600.0)
 
 # Optional debug trace of resolved server URL
 try:
