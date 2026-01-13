@@ -6,7 +6,7 @@ whisper.cpp server.
 ## Features
 
 - Retrieves the video file for the updated scene.
-- Transcribes audio and writes an `.srt` file next to the video.
+- Transcribes audio and writes an `.srt` file next to the video. **Note:** This will overwrite any existing SRT files that match the naming scheme.
 - Adds a UI dropdown button (via `whisper_transcribe.js`) to manually trigger transcription for the current scene.
 - The transcribe option is now available in the three vertical dots **operations menu** alongside rescan, generate, etc.
 
