@@ -188,6 +188,21 @@ def _check_whisper_server(server_url: str, timeout: float = 5.0) -> None:
                 "Configure the 'Whisper Server URL' plugin setting or set WHISPER_SERVER_URL. "
                 f"Underlying error: {e}"
             ) from e
+    else:
+        # Fallback to urllib request if `requests` is unavailable.
+        req = urllib.request.Request(server_url, method="OPTIONS")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as _:
+                return
+        except urllib.error.HTTPError:
+            # Server reachable (wrong method) – that's sufficient to proceed.
+            return
+        except Exception as e:
+            raise RuntimeError(
+                f"Cannot reach whisper server at {server_url}. "
+                "Configure the 'Whisper Server URL' plugin setting or set WHISPER_SERVER_URL. "
+                f"Underlying error: {e}"
+            ) from e
 
 
 def _build_caption_path(video_path: str, language_code: str | None = None) -> str:
