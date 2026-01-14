@@ -188,6 +188,21 @@ def _check_whisper_server(server_url: str, timeout: float = 5.0) -> None:
                 "Configure the 'Whisper Server URL' plugin setting or set WHISPER_SERVER_URL. "
                 f"Underlying error: {e}"
             ) from e
+    else:
+        # Fallback to urllib request if `requests` is unavailable.
+        req = urllib.request.Request(server_url, method="OPTIONS")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as _:
+                return
+        except urllib.error.HTTPError:
+            # Server reachable (wrong method) – that's sufficient to proceed.
+            return
+        except Exception as e:
+            raise RuntimeError(
+                f"Cannot reach whisper server at {server_url}. "
+                "Configure the 'Whisper Server URL' plugin setting or set WHISPER_SERVER_URL. "
+                f"Underlying error: {e}"
+            ) from e
 
 
 def _build_caption_path(video_path: str, language_code: str | None = None) -> str:
@@ -215,7 +230,6 @@ def _trigger_metadata_scan(paths: list[str]) -> None:
       metadataScan(input: $input)
     }
     """
-    # Keep the scan as light as possible – just look at the provided paths.
     variables = {
         "input": {
             "paths": paths,
@@ -242,20 +256,6 @@ def _trigger_metadata_scan(paths: list[str]) -> None:
             stash.Warn(f"Metadata scan triggered for captions but no job id returned. Paths={paths}")
     except Exception as e:
         stash.Warn(f"Failed to start metadata scan for captions: {e}")
-    else:
-        req = urllib.request.Request(server_url, method="OPTIONS")
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as _:
-                return
-        except urllib.error.HTTPError:
-            # Server reachable (wrong method) – that's sufficient to proceed.
-            return
-        except Exception as e:
-            raise RuntimeError(
-                f"Cannot reach whisper server at {server_url}. "
-                "Configure the 'Whisper Server URL' plugin setting or set WHISPER_SERVER_URL. "
-                f"Underlying error: {e}"
-            ) from e
 
 
 def transcribe_video(video_path: str, translate: bool = False, server_url: str = "http://127.0.01:9191/inference", caption_language: str | None = None) -> str:
@@ -466,16 +466,17 @@ def transcribe_scene(scene_id: int):
         if dry_run:
             stash.Log(f"Dry-run: would transcribe '{video_path}' -> '{caption_path}' (translate={translate_to_english}, server_url={server_url})")
         else:
+            # Queue metadata scan before transcription starts
+            try:
+                _trigger_metadata_scan([caption_path])
+            except Exception as e:
+                stash.Warn(f"Failed to start metadata scan for captions on scene {scene_id}: {e}")
             caption_path = transcribe_video(
                 video_path,
                 translate=translate_to_english,
                 server_url=server_url,
                 caption_language=caption_language,
             )
-            try:
-                _trigger_metadata_scan([caption_path])
-            except Exception as e:
-                stash.Warn(f"Failed to start metadata scan for captions on scene {scene_id}: {e}")
 
         stash.Log(f"Transcription completed for scene {scene_id} (file: {video_path})")
     except Exception as e:
