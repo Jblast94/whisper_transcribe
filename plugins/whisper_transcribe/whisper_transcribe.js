@@ -60,10 +60,57 @@
     }
   }
 
+  function basename(path) {
+    if (typeof path !== 'string') return undefined;
+    const trimmed = path.trim();
+    if (!trimmed) return undefined;
+    const parts = trimmed.split(/[\\/]/);
+    return parts[parts.length - 1] || undefined;
+  }
+
+  async function buildJobDescription(graphqlURL, sceneId) {
+    const query = `
+      query WhisperTranscribeScene($id: ID!) {
+        findScene(id: $id) {
+          title
+          files {
+            path
+          }
+        }
+      }
+    `;
+
+    try {
+      const res = await fetch(graphqlURL, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: { id: sceneId } }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+
+      const json = await res.json();
+      if (json.errors || !json.data || !json.data.findScene) return `whisper_transcribe: scene ${sceneId}`;
+
+      const scene = json.data.findScene;
+      const filePath = scene.files?.[0]?.path;
+      const fileLabel = basename(filePath);
+      if (fileLabel) return `whisper_transcribe: ${fileLabel}`;
+
+      const title = (scene.title || '').trim();
+      if (title) return `whisper_transcribe: ${title}`;
+
+      return `whisper_transcribe: scene ${sceneId}`;
+    } catch (e) {
+      console.warn('[WhisperTranscribe] Failed to build job description:', e);
+      return `whisper_transcribe: scene ${sceneId}`;
+    }
+  }
+
   async function runTranscribe(sceneId) {
     const mutation = `
-      mutation RunPluginTask($plugin_id: ID!, $args_map: Map!) {
-        runPluginTask(plugin_id: $plugin_id, args_map: $args_map)
+      mutation RunPluginTask($plugin_id: ID!, $args_map: Map!, $description: String) {
+        runPluginTask(plugin_id: $plugin_id, args_map: $args_map, description: $description)
       }
     `;
     const args_map = { mode: 'transcribe_scene_task', scene_id: sceneId };
@@ -78,12 +125,14 @@
       return;
     }
 
+    const description = await buildJobDescription(graphqlURL, sceneId);
+
     try {
       const res = await fetch(graphqlURL, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: mutation, variables: { plugin_id: resolvedId, args_map } }),
+        body: JSON.stringify({ query: mutation, variables: { plugin_id: resolvedId, args_map, description } }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const json = await res.json();
